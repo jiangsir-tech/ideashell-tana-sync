@@ -86,7 +86,9 @@ struct IdeaShellTanaApp: App {
     init() {
         // LaunchAgent starts this same signed executable in headless mode.  This
         // keeps automatic sync independent of Node.js, zsh, and a mutable script.
-        guard CommandLine.arguments.contains("--sync-background") else { return }
+        let backgroundSync = CommandLine.arguments.contains("--sync-background")
+        let dryRun = CommandLine.arguments.contains("--sync-dry-run")
+        guard backgroundSync || dryRun else { return }
         let base = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/ideashell-tana-sync")
         let logs = FileManager.default.homeDirectoryForCurrentUser
@@ -94,7 +96,11 @@ struct IdeaShellTanaApp: App {
         try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
         try? FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
         do {
-            let result = try NativeSync.run(baseDirectory: base)
+            let result = try NativeSync.run(baseDirectory: base, dryRun: dryRun)
+            if dryRun {
+                print("Dry run: new=\(result.todayNew), posted=\(result.todayPosted), pending=\(result.todayPending), failed=\(result.todayFailed)")
+                exit(0)
+            }
             let payload: [String: Any] = ["status": "success", "updatedAt": ISO8601DateFormatter().string(from: Date()), "postedNotes": result.postedNotes, "pendingNotes": result.pendingNotes, "todayDate": result.todayDate, "todayNew": result.todayNew, "todayPosted": result.todayPosted, "todayPending": result.todayPending, "todayFailed": result.todayFailed, "warnings": result.warnings]
             try JSONSerialization.data(withJSONObject: payload).write(to: base.appendingPathComponent(".ideashell-tana-status.json"), options: .atomic)
             print("Posted to Tana: \(result.postedNotes)")

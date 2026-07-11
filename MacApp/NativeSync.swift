@@ -33,6 +33,10 @@ enum NativeSync {
         var dailyStats: [String: DayStats] = [:]
         var backfillComplete = false
         var lastScanAt: String?
+        // Kept optional so states written before local-date statistics remain
+        // decodable. The first native run after this upgrade re-scans today.
+        var localDateStatisticsMigrated: Bool?
+        var localDateStatisticsMigrationVersion: Int?
     }
     private struct Note { var id: String; var title: String; var createdAt: String; var summary: String; var content: String }
 
@@ -57,16 +61,29 @@ enum NativeSync {
         var marked = Set(state.markedIds + state.syncedIds)
 
         for note in fetched.notes where !note.id.isEmpty {
-            if noteDayKey(note) == today { append(note.id, to: &day.discoveredIds) }
+            let statisticsDay = statisticsDayKey(note, fallback: today)
+            removeStatistic(note.id, fromOtherDaysThan: statisticsDay, state: &state, list: \.discoveredIds)
+            if statisticsDay == today {
+                append(note.id, to: &day.discoveredIds)
+            } else {
+                var sourceDay = state.dailyStats[statisticsDay] ?? DayStats()
+                append(note.id, to: &sourceDay.discoveredIds)
+                state.dailyStats[statisticsDay] = sourceDay
+            }
             if isMarked(note.title, prefix: config["IDEASHELL_TRANSFERRED_PREFIX"] ?? "～～") {
                 posted.insert(note.id); marked.insert(note.id)
-                if statisticsDayKey(note, fallback: today) == today {
+            }
+            // A source-title mark can fail or be disabled after Tana accepted
+            // the note. The persisted posted ID is the authoritative record
+            // for statistics in that case.
+            if posted.contains(note.id) {
+                removeStatistic(note.id, fromOtherDaysThan: statisticsDay, state: &state, list: \.postedIds)
+                if statisticsDay == today {
                     append(note.id, to: &day.postedIds)
                 } else {
-                    let key = statisticsDayKey(note, fallback: today)
-                    var sourceDay = state.dailyStats[key] ?? DayStats()
+                    var sourceDay = state.dailyStats[statisticsDay] ?? DayStats()
                     append(note.id, to: &sourceDay.postedIds)
-                    state.dailyStats[key] = sourceDay
+                    state.dailyStats[statisticsDay] = sourceDay
                 }
                 state.pendingNotes.removeValue(forKey: note.id); removeFailure(note.id, state: &state)
             }
@@ -114,7 +131,7 @@ enum NativeSync {
             catch { result.warnings.append("\(note.id): \(error.localizedDescription)") }
         }
         state.postedIds = posted.sorted(); state.syncedIds = state.postedIds; state.markedIds = marked.sorted()
-        state.backfillComplete = true; state.lastScanAt = runStartedAt; persist(state, to: stateURL)
+        state.backfillComplete = true; state.lastScanAt = runStartedAt; state.localDateStatisticsMigrated = true; state.localDateStatisticsMigrationVersion = 3; persist(state, to: stateURL)
         let finalDay = state.dailyStats[today] ?? DayStats()
         result.pendingNotes = state.pendingNotes.count; result.todayNew = Set(finalDay.discoveredIds).count; result.todayPosted = Set(finalDay.postedIds).count
         result.todayPending = state.pendingNotes.keys.filter { finalDay.discoveredIds.contains($0) }.count; result.todayFailed = Set(finalDay.failedIds).count
@@ -140,7 +157,15 @@ enum NativeSync {
 
     private static func fetchNotes(token: String, state: State, config: [String: String]) throws -> (notes: [Note], warnings: [String]) {
         let session = try mcpSession(token); let limit = 20; var all: [Note] = []; var seen = Set<String>(); var end: String?
-        let start: String? = state.backfillComplete ? state.lastScanAt.flatMap { ISO8601DateFormatter().date(from: $0) }.map { ISO8601DateFormatter().string(from: $0.addingTimeInterval(-600)) } : nil
+        let start: String?
+        if state.localDateStatisticsMigrationVersion != 3 {
+            // One safe, read-only migration pass: revisit today's source notes
+            // so notes recorded after local midnight are moved into today's
+            // local-date statistics bucket without reposting to Tana.
+            start = ISO8601DateFormatter().string(from: Calendar.autoupdatingCurrent.startOfDay(for: Date()))
+        } else {
+            start = state.backfillComplete ? state.lastScanAt.flatMap { ISO8601DateFormatter().date(from: $0) }.map { ISO8601DateFormatter().string(from: $0.addingTimeInterval(-600)) } : nil
+        }
         repeat {
             var args: [String: Any] = ["limit": limit]; if let start { args["start_time"] = start }; if let end { args["end_time"] = end }
             let text = try tool(session, token, "recent_notes", args); let page = parseRecent(text)
@@ -232,14 +257,29 @@ enum NativeSync {
     private static func noteReadiness(_ note: Note) -> Bool { let title = note.title.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(); let body = extractText(note).trimmingCharacters(in: .whitespacesAndNewlines); return !["", "(untitled)", "untitled", "无标题", "转写中...", "转写中…"].contains(title) && !body.isEmpty && body != "转写中..." && body != "转写中…" }
     private static func stableFingerprint(_ note: Note) -> String { Data("\(note.title)\u{1f}\(extractText(note))\u{1f}\(note.summary)".utf8).base64EncodedString() }
     private static func isMarked(_ title: String, prefix: String) -> Bool { title.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix(prefix) }
-    private static func dayKey(_ date: Date) -> String { let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.dateFormat = "yyyy-MM-dd"; return f.string(from: date) }
-    private static func noteDayKey(_ note: Note) -> String { String(note.createdAt.prefix(10)) }
+    private static func dayKey(_ date: Date) -> String { let f = DateFormatter(); f.locale = Locale(identifier: "en_US_POSIX"); f.timeZone = .autoupdatingCurrent; f.dateFormat = "yyyy-MM-dd"; return f.string(from: date) }
+    private static func noteDayKey(_ note: Note) -> String {
+        // ideaShell returns timestamps such as 2026-07-11T19:52:42.721Z.
+        // The calendar date in that UTC string may be yesterday on the user's
+        // Mac, so parse the instant before deriving its local statistics day.
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = formatter.date(from: note.createdAt) { return dayKey(date) }
+        return String(note.createdAt.prefix(10))
+    }
     private static func statisticsDayKey(_ note: Note, fallback: String) -> String {
         let key = noteDayKey(note)
         guard key.range(of: #"^\d{4}-\d{2}-\d{2}$"#, options: .regularExpression) != nil else { return fallback }
         return key
     }
     private static func append(_ id: String, to array: inout [String]) { if !array.contains(id) { array.append(id) } }
+    private static func removeStatistic(_ id: String, fromOtherDaysThan day: String, state: inout State, list: WritableKeyPath<DayStats, [String]>) {
+        for key in state.dailyStats.keys where key != day {
+            var stats = state.dailyStats[key] ?? DayStats()
+            stats[keyPath: list].removeAll { $0 == id }
+            state.dailyStats[key] = stats
+        }
+    }
     private static func removeFailure(_ id: String, state: inout State) { for key in state.dailyStats.keys { state.dailyStats[key]?.failedIds.removeAll { $0 == id } } }
     private static func loadState(_ url: URL) -> State { guard let data = try? Data(contentsOf: url), let value = try? JSONDecoder().decode(State.self, from: data) else { return State() }; return value }
     private static func persist(_ state: State, to url: URL) { var state = state; state.dailyStats = Dictionary(uniqueKeysWithValues: state.dailyStats.sorted { $0.key > $1.key }.prefix(365).map { ($0.key, $0.value) }); let temp = url.appendingPathExtension("tmp"); if let data = try? JSONEncoder().encode(state) { try? data.write(to: temp, options: .atomic); try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: temp.path); try? FileManager.default.removeItem(at: url); try? FileManager.default.moveItem(at: temp, to: url) } }
