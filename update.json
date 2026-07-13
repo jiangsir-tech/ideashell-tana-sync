@@ -1,0 +1,9 @@
+{
+  "version": "0.1.0-beta.4",
+  "build": 4,
+  "releaseNotes": {
+    "zh-Hans": "修复正文提取问题，减少异常格式导致的同步失败。",
+    "en": "Fixed note-body extraction to reduce sync failures caused by unexpected formatting."
+  },
+  "downloadURL": "https://github.com/1551255004/ideashell-tana-sync/releases/tag/v0.1.0-beta.4"
+}

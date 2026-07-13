@@ -60,6 +60,11 @@ enum NativeSync {
         var posted = Set(state.postedIds + state.syncedIds)
         var marked = Set(state.markedIds + state.syncedIds)
 
+        // Posted IDs are authoritative. Clear any stale failure entries left
+        // by an older run before rebuilding today's summary.
+        for id in posted { removeFailure(id, state: &state) }
+        day.failedIds.removeAll { posted.contains($0) }
+
         for note in fetched.notes where !note.id.isEmpty {
             let statisticsDay = statisticsDayKey(note, fallback: today)
             removeStatistic(note.id, fromOtherDaysThan: statisticsDay, state: &state, list: \.discoveredIds)
@@ -85,6 +90,7 @@ enum NativeSync {
                     append(note.id, to: &sourceDay.postedIds)
                     state.dailyStats[statisticsDay] = sourceDay
                 }
+                if statisticsDay == today { day.failedIds.removeAll { $0 == note.id } }
                 state.pendingNotes.removeValue(forKey: note.id); removeFailure(note.id, state: &state)
             }
         }
@@ -122,8 +128,9 @@ enum NativeSync {
             var sourceDay = state.dailyStats[sourceDayKey] ?? DayStats()
             do { try postToTana(text: text, token: tanaToken, target: config["TANA_TARGET_NODE_ID"] ?? "INBOX") }
             catch { append(note.id, to: &sourceDay.failedIds); state.dailyStats[sourceDayKey] = sourceDay; persist(state, to: stateURL); throw error }
-            posted.insert(note.id); append(note.id, to: &sourceDay.postedIds); state.pendingNotes.removeValue(forKey: note.id); removeFailure(note.id, state: &state)
-            state.postedIds = posted.sorted(); state.syncedIds = state.postedIds; state.dailyStats[sourceDayKey] = sourceDay; persist(state, to: stateURL); result.postedNotes += 1
+            posted.insert(note.id); append(note.id, to: &sourceDay.postedIds); sourceDay.failedIds.removeAll { $0 == note.id }
+            state.pendingNotes.removeValue(forKey: note.id); state.dailyStats[sourceDayKey] = sourceDay; removeFailure(note.id, state: &state)
+            state.postedIds = posted.sorted(); state.syncedIds = state.postedIds; persist(state, to: stateURL); result.postedNotes += 1
         }
         let needsMark = config["IDEASHELL_MARK_TRANSFERRED"] == "0" ? [] : fetched.notes.filter { posted.contains($0.id) && !marked.contains($0.id) && !isMarked($0.title, prefix: config["IDEASHELL_TRANSFERRED_PREFIX"] ?? "～～") }
         for note in needsMark {
@@ -211,7 +218,16 @@ enum NativeSync {
         throw SyncError("源笔记标题未确认出现转移标记")
     }
 
-    private static func postToTana(text: String, token: String, target: String) throws { _ = try requestJSON(tanaEndpoint, method: "POST", headers: ["Authorization": "Bearer \(token)"], body: ["targetNodeId": target, "nodes": [["name": text]]]) }
+    private static func postToTana(text: String, token: String, target: String) throws {
+        let name = tanaNodeName(text)
+        guard !name.isEmpty else { throw SyncError("笔记正文为空，无法写入 Tana。") }
+        _ = try requestJSON(tanaEndpoint, method: "POST", headers: ["Authorization": "Bearer \(token)"], body: ["targetNodeId": target, "nodes": [["name": name]]])
+    }
+    private static func tanaNodeName(_ text: String) -> String {
+        text.components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+    }
     private static func polishedText(_ text: String, config: [String: String], baseDirectory: URL) throws -> String {
         guard config["OPENAI_POLISH_ENABLED"] != "0" else { return text }
         guard !(config["AI_API_KEY"] ?? config["OPENAI_API_KEY"] ?? "").isEmpty || config["AI_PROVIDER"] == "ollama" else { return text }

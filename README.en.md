@@ -62,6 +62,24 @@ After entering credentials, choose **Sync Now** from the menu bar. New notes are
 
 Enable automatic sync in **Settings**, then choose an interval or a daily time. Your Mac must be on and you must be signed in, but ideaShell, Tana, and Terminal do not need to be open. New voice notes may take 5–10 minutes to reach Tana while transcription completes.
 
+## Publishing updates
+
+The About window includes **Check for Updates**. It reads `update.json` from the repository root, compares the monotonically increasing build number, shows release notes, and opens the corresponding GitHub Release download page when an update is available.
+
+For beta releases, the trailing beta number is used as the build number automatically:
+
+```bash
+./build-dmg.sh 0.1.0-beta.5
+```
+
+For a stable release or a custom build, provide an integer greater than every previously published build:
+
+```bash
+APP_BUILD=6 ./build-dmg.sh 0.1.0
+```
+
+Create the GitHub Release and confirm that its DMG can be downloaded before updating and pushing `update.json`. This prevents users from seeing an update that is not available yet.
+
 To inspect the background job:
 
 ```bash
@@ -76,7 +94,7 @@ launchctl print gui/$(id -u)/com.ideashell-tana-sync
 
 ## Feedback
 
-This is an early test release. Please report installation, sync, automatic-sync, or AI-polishing problems through [GitHub Issues](https://github.com/1551255004/ideashell-tana-sync/issues).
+Choose **Feedback** in the app's About window, or open the [feedback form](https://tally.so/r/2EyvKg). Remove API keys, tokens, note text, and other private information before submitting.
 
 ## License
 

@@ -4,6 +4,7 @@ set -euo pipefail
 BASE_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_NAME="闪念同步"
 APP_VERSION="${APP_VERSION:-0.1.0}"
+APP_DISPLAY_VERSION="${APP_DISPLAY_VERSION:-$APP_VERSION}"
 APP_BUILD="${APP_BUILD:-1}"
 APP_DIR="$BASE_DIR/dist/$APP_NAME.app"
 CONTENTS="$APP_DIR/Contents"
@@ -26,6 +27,7 @@ for arch in arm64 x86_64; do
     -framework AppKit \
     -framework ServiceManagement \
     "$BASE_DIR/MacApp/NativeSync.swift" \
+    "$BASE_DIR/MacApp/UpdateChecker.swift" \
     "$BASE_DIR/MacApp/IdeaShellTanaApp.swift" \
     -o "$MACOS/IdeaShellTana-$arch"
 done
@@ -54,6 +56,7 @@ cat > "$CONTENTS/Info.plist" <<EOF
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$APP_VERSION</string>
   <key>CFBundleVersion</key><string>$APP_BUILD</string>
+  <key>IdeaSyncDisplayVersion</key><string>$APP_DISPLAY_VERSION</string>
   <key>NSHumanReadableCopyright</key><string>© 2026 江sir爱数码 · MIT License</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>

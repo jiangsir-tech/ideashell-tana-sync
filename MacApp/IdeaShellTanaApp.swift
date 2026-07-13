@@ -137,6 +137,13 @@ struct IdeaShellTanaApp: App {
                 .environment(\.locale, appLanguage.locale)
         }
         .defaultSize(width: 720, height: 470)
+
+        Window(appString("关于闪念同步"), id: "about") {
+            AboutView()
+                .environment(\.locale, appLanguage.locale)
+        }
+        .defaultSize(width: 390, height: 360)
+        .windowResizability(.contentSize)
     }
 
     private static let menuBarIcon: NSImage = {
@@ -308,7 +315,7 @@ private struct MenuContent: View {
                     bringWindowToFront(identifier: "com_apple_SwiftUI_Settings_window", title: "设置", after: 0)
                     bringWindowToFront(identifier: "com_apple_SwiftUI_Settings_window", title: "设置", after: 0.15)
                 }
-                FooterButton(title: "关于") { showAboutPanel() }
+                FooterButton(title: "关于") { openAboutWindow() }
             }
         }
         .padding(14)
@@ -328,24 +335,10 @@ private struct MenuContent: View {
         }
     }
 
-    private func showAboutPanel() {
-        let paragraph = NSMutableParagraphStyle()
-        paragraph.alignment = .center
-        let credits = NSAttributedString(
-            string: appString("作者：江sir爱数码\n将闪念贝壳笔记同步至 Tana"),
-            attributes: [
-                .font: NSFont.systemFont(ofSize: NSFont.smallSystemFontSize),
-                .foregroundColor: NSColor.secondaryLabelColor,
-                .paragraphStyle: paragraph,
-            ]
-        )
-        NSApp.activate(ignoringOtherApps: true)
-        NSApp.orderFrontStandardAboutPanel(options: [
-            .applicationName: appString("闪念同步"),
-            .applicationVersion: "0.1.0 Beta",
-            .version: "1",
-            .credits: credits,
-        ])
+    private func openAboutWindow() {
+        openWindow(id: "about")
+        bringWindowToFront(identifier: nil, title: appString("关于闪念同步"), after: 0)
+        bringWindowToFront(identifier: nil, title: appString("关于闪念同步"), after: 0.15)
     }
 
     private func openSyncHistory() {
@@ -353,6 +346,111 @@ private struct MenuContent: View {
         bringWindowToFront(identifier: nil, title: appString("同步历史"), after: 0)
         bringWindowToFront(identifier: nil, title: appString("同步历史"), after: 0.15)
     }
+}
+
+private struct AboutView: View {
+    @StateObject private var updateChecker = UpdateChecker()
+    @AppStorage("appLanguage") private var appLanguageRaw = AppLanguage.system.rawValue
+
+    var body: some View {
+        VStack(spacing: 14) {
+            Image(nsImage: NSApplication.shared.applicationIconImage)
+                .resizable()
+                .frame(width: 82, height: 82)
+
+            VStack(spacing: 5) {
+                Text("闪念同步")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+                Text(appFormat("版本 %@（构建 %d）", updateChecker.currentVersion, updateChecker.currentBuild))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            Text("将闪念贝壳笔记同步至 Tana")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+
+            VStack(spacing: 4) {
+                Text("作者：江sir爱数码")
+                Text("MIT License · © 2026")
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+
+            updateStatus
+
+            HStack(spacing: 10) {
+                Button {
+                    if let update = updateChecker.discoveredUpdate {
+                        updateChecker.openDownloadPage(update)
+                    } else {
+                        updateChecker.checkForUpdates()
+                    }
+                } label: {
+                    if case .checking = updateChecker.state {
+                        HStack(spacing: 7) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text("正在检查更新…")
+                        }
+                    } else {
+                        Text(updateChecker.discoveredUpdate == nil ? "检查更新" : "前往下载")
+                    }
+                }
+                .disabled(isChecking)
+
+                Button("反馈与建议") {
+                    NSWorkspace.shared.open(Self.feedbackURL)
+                }
+            }
+            .controlSize(.large)
+            .focusEffectDisabled()
+        }
+        .padding(.horizontal, 34)
+        .padding(.vertical, 26)
+        .frame(width: 390)
+        .id(appLanguageRaw)
+        .alert(item: $updateChecker.presentedUpdate) { update in
+            Alert(
+                title: Text(appFormat("发现新版本 %@", update.version)),
+                message: Text(update.localizedReleaseNotes(languageCode: effectiveLanguageCode())),
+                primaryButton: .default(Text("前往下载")) {
+                    updateChecker.openDownloadPage(update)
+                },
+                secondaryButton: .cancel(Text("暂不更新"))
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var updateStatus: some View {
+        switch updateChecker.state {
+        case .idle, .checking:
+            EmptyView()
+        case .upToDate:
+            Label("当前已是最新版本", systemImage: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+                .font(.caption)
+        case .updateAvailable:
+            if let update = updateChecker.discoveredUpdate {
+                Text(appFormat("发现新版本：%@", update.version))
+                    .foregroundStyle(.blue)
+                    .font(.caption)
+            }
+        case .failed:
+            Text("无法检查更新，请检查网络后重试。")
+                .foregroundStyle(.red)
+                .font(.caption)
+        }
+    }
+
+    private var isChecking: Bool {
+        if case .checking = updateChecker.state { return true }
+        return false
+    }
+
+    private static let feedbackURL = URL(string: "https://tally.so/r/2EyvKg")!
 }
 
 private struct TodayMetric: View {
