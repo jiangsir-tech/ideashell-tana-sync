@@ -1,9 +1,9 @@
 {
-  "version": "0.1.0-beta.5",
-  "build": 5,
+  "version": "0.1.0-beta.6",
+  "build": 6,
   "releaseNotes": {
-    "zh-Hans": "新增检查更新与反馈入口，并修复失败统计和 Tana 换行写入问题。",
-    "en": "Added update checks and feedback, and fixed stale failure counts and Tana writes with line breaks."
+    "zh-Hans": "首个已完成 Apple 签名与公证的测试版，可直接安装，无需绕过“未识别开发者”提示。",
+    "en": "First beta signed and notarized by Apple. Install directly without bypassing the unidentified-developer warning."
   },
-  "downloadURL": "https://github.com/jiangsir-tech/ideashell-tana-sync/releases/tag/v0.1.0-beta.5"
+  "downloadURL": "https://github.com/jiangsir-tech/ideashell-tana-sync/releases/tag/v0.1.0-beta.6"
 }
