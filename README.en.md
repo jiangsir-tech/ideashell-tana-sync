@@ -37,6 +37,12 @@ The stable release is Apple-signed and notarized, so it opens normally. Use `INB
 - A Tana destination node ID (or `INBOX`)
 - Optional: an AI provider API key for polishing notes before sync
 
+## Settings at a glance
+
+Settings brings together language, launch at startup, ideaShell and Tana connections, and optional AI polishing. Most settings save automatically; the polishing prompt has its own **Save Prompt** button. Sensitive values in the screenshot are irreversibly redacted.
+
+![Settings page: language, startup, connection credentials, and optional AI polishing; sensitive values are redacted](docs/images/settings-redacted-en.png)
+
 ## How syncing works
 
 ```text
